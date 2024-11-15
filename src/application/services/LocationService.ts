@@ -1,14 +1,34 @@
 import { Location, LocationSearchParams } from "@/domain/entities/Location";
 import { ILocationRepository } from "@/domain/repositories/ILocationRepository";
 import { OpenWeatherApi } from "@/infrastructure/api/openWeatherApi";
+import { CacheService } from '@/infrastructure/services/CacheService';
 
 export class LocationService {
+  private readonly cacheService: CacheService;
+
   constructor(
     private readonly locationRepository: ILocationRepository,
     private readonly weatherApi: OpenWeatherApi
-  ) {}
+  ) {
+    this.cacheService = new CacheService();
+  }
 
   async findLocations(params: LocationSearchParams): Promise<Location[]> {
+    const cacheKey = CacheService.generateKey(
+      'locations',
+      params.latitude.toString(),
+      params.longitude.toString(),
+      params.radius.toString(),
+      params.weatherCondition || 'none',
+      params.date || 'current'
+    );
+
+    const cachedResults = await this.cacheService.get<Location[]>(cacheKey);
+    if (cachedResults) {
+      console.log('Returning cached results');
+      return cachedResults;
+    }
+
     console.log("Finding locations with params:", params);
 
     const locations = await this.locationRepository.findWithinRadius(
@@ -76,6 +96,9 @@ export class LocationService {
         });
 
       console.log("Filtered locations by weather:", filteredLocations);
+
+      // Cache the final results
+      this.cacheService.set(cacheKey, filteredLocations, 900); // Cache for 15 minutes
       return filteredLocations;
     }
 

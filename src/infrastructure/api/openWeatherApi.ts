@@ -1,5 +1,6 @@
 import axios from "axios";
 import { Location } from "@/domain/entities/Location";
+import { CacheService } from "../services/CacheService";
 
 interface NominatimResponse {
   name: string;
@@ -69,6 +70,7 @@ interface GoogleDistanceResponse {
 export class OpenWeatherApi {
   private readonly weatherApiKey: string;
   private readonly googleMapsKey: string;
+  private readonly cacheService: CacheService;
 
   constructor() {
     this.weatherApiKey = process.env.WEATHER_API_KEY!;
@@ -79,6 +81,9 @@ export class OpenWeatherApi {
     if (!this.googleMapsKey) {
       throw new Error("Google Maps API key is not configured");
     }
+
+    // Initialize cache with different TTLs
+    this.cacheService = new CacheService();
   }
 
   async findNearbyCities(
@@ -86,6 +91,19 @@ export class OpenWeatherApi {
     lon: number,
     radius: number = 100
   ): Promise<Location[]> {
+    const cacheKey = CacheService.generateKey(
+      "cities",
+      lat.toString(),
+      lon.toString(),
+      radius.toString()
+    );
+    const cachedCities = await this.cacheService.get<Location[]>(cacheKey) || [];
+
+    if (cachedCities.length > 0) {
+      console.log("Returning cached cities");
+      return cachedCities;
+    }
+
     try {
       const allLocations: Location[] = [];
 
@@ -204,6 +222,8 @@ export class OpenWeatherApi {
         `Found ${uniqueLocations.length} unique cities within ${radius}km radius`
       );
 
+      // Cache the results before returning
+      this.cacheService.set(cacheKey, uniqueLocations, 3600); // Cache for 1 hour
       return uniqueLocations.sort((a, b) => a.distance - b.distance);
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -248,7 +268,23 @@ export class OpenWeatherApi {
     return Array.from(seen.values());
   }
 
-  async getWeather(lat: number, lon: number, date?: string): Promise<Location["weather"]> {
+  async getWeather(
+    lat: number,
+    lon: number,
+    date?: string
+  ): Promise<Location["weather"]> {
+    const cacheKey = CacheService.generateKey(
+      "weather",
+      lat.toString(),
+      lon.toString(),
+      date || "current"
+    );
+    const cachedWeather = await this.cacheService.get<Location["weather"]>(cacheKey);
+    if (cachedWeather) {
+      console.log("Returning cached weather");
+      return cachedWeather;
+    }
+
     try {
       if (!date) {
         // Get current weather
@@ -365,6 +401,19 @@ export class OpenWeatherApi {
     originLon: number,
     locations: Location[]
   ): Promise<Location[]> {
+    const cacheKey = CacheService.generateKey(
+      "distances",
+      originLat.toString(),
+      originLon.toString(),
+      locations.map((l) => `${l.latitude},${l.longitude}`).join(",")
+    );
+    const cachedDistances = await this.cacheService.get<Location[]>(cacheKey) || [];
+
+    if (cachedDistances.length > 0) {
+      console.log("Returning cached distances");
+      return cachedDistances;
+    }
+
     try {
       // Google Maps API has a limit of 25 destinations per request
       const batchSize = 25;
@@ -428,6 +477,7 @@ export class OpenWeatherApi {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
+      this.cacheService.set(cacheKey, locationsWithDrivingDistance, 86400); // Cache for 24 hours
       return locationsWithDrivingDistance;
     } catch (error) {
       console.error("Error calculating driving distances:", error);
