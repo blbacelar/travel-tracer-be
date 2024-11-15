@@ -29,6 +29,15 @@ A Node.js/Express backend service that helps users find cities within a specifie
 - API keys for:
   - WeatherAPI.com
   - Google Maps Platform
+  - Redis Cloud account
+
+## Environment Setup
+
+1. Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
 
 ## Environment Variables
 
