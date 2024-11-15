@@ -2,7 +2,7 @@
   "name": "travel-tracer-be",
   "version": "1.0.0",
   "description": "Travel location finder based on weather and distance",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon -r dotenv/config -r tsconfig-paths/register src/index.ts",
     "build": "tsc && tsc-alias",
