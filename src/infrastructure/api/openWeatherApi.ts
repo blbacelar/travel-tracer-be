@@ -18,10 +18,34 @@ interface NominatimResponse {
 }
 
 interface WeatherApiResponse {
-  current: {
+  current?: {
     temp_c: number;
     condition: {
       text: string;
+    };
+  };
+  forecast?: {
+    forecastday: Array<{
+      date: string;
+      day: {
+        avgtemp_c: number;
+        condition: {
+          text: string;
+        };
+      };
+    }>;
+  };
+  history?: {
+    forecast: {
+      forecastday: Array<{
+        date: string;
+        day: {
+          avgtemp_c: number;
+          condition: {
+            text: string;
+          };
+        };
+      }>;
     };
   };
 }
@@ -224,26 +248,87 @@ export class OpenWeatherApi {
     return Array.from(seen.values());
   }
 
-  async getWeather(lat: number, lon: number): Promise<Location["weather"]> {
+  async getWeather(lat: number, lon: number, date?: string): Promise<Location["weather"]> {
     try {
-      const response = await axios.get<WeatherApiResponse>(
-        `http://api.weatherapi.com/v1/current.json`,
-        {
-          params: {
-            key: this.weatherApiKey,
-            q: `${lat},${lon}`,
-          },
-        }
-      );
+      if (!date) {
+        // Get current weather
+        const response = await axios.get<WeatherApiResponse>(
+          `http://api.weatherapi.com/v1/current.json`,
+          {
+            params: {
+              key: this.weatherApiKey,
+              q: `${lat},${lon}`,
+            },
+          }
+        );
 
-      if (!response.data || !response.data.current) {
-        throw new Error("Invalid response from Weather API");
+        if (!response.data?.current) {
+          throw new Error("Invalid response from Weather API");
+        }
+
+        return {
+          temperature: response.data.current.temp_c,
+          condition: response.data.current.condition.text,
+        };
       }
 
-      return {
-        temperature: response.data.current.temp_c,
-        condition: response.data.current.condition.text,
-      };
+      const today = new Date();
+      const targetDate = new Date(date);
+      const diffTime = targetDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays > 14) {
+        throw new Error("Can only fetch weather up to 14 days in the future");
+      }
+
+      if (diffDays > 0) {
+        // Get future forecast
+        const response = await axios.get<WeatherApiResponse>(
+          `http://api.weatherapi.com/v1/forecast.json`,
+          {
+            params: {
+              key: this.weatherApiKey,
+              q: `${lat},${lon}`,
+              days: diffDays + 1,
+              dt: date,
+            },
+          }
+        );
+
+        if (!response.data?.forecast?.forecastday?.[0]) {
+          throw new Error("Invalid response from Weather API");
+        }
+
+        const forecast = response.data.forecast.forecastday[0];
+        return {
+          temperature: forecast.day.avgtemp_c,
+          condition: forecast.day.condition.text,
+          date: forecast.date,
+        };
+      } else {
+        // Get historical weather
+        const response = await axios.get<WeatherApiResponse>(
+          `http://api.weatherapi.com/v1/history.json`,
+          {
+            params: {
+              key: this.weatherApiKey,
+              q: `${lat},${lon}`,
+              dt: date,
+            },
+          }
+        );
+
+        if (!response.data?.history?.forecast?.forecastday?.[0]) {
+          throw new Error("Invalid response from Weather API");
+        }
+
+        const history = response.data.history.forecast.forecastday[0];
+        return {
+          temperature: history.day.avgtemp_c,
+          condition: history.day.condition.text,
+          date: history.date,
+        };
+      }
     } catch (error) {
       if (axios.isAxiosError(error)) {
         console.error("Weather API Error:", {

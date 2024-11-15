@@ -7,6 +7,7 @@ export interface Location {
   weather?: {
     temperature: number;
     condition: string;
+    date?: string;
   };
   distance: number;
   straightLineDistance?: number;
@@ -17,4 +18,5 @@ export interface LocationSearchParams {
   longitude: number;
   radius: number;
   weatherCondition?: string;
+  date?: string;
 } 
