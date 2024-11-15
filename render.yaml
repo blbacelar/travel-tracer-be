@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: travel-tracer-be
+    runtime: node
+    buildCommand: node build.js
+    startCommand: node dist/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000 
