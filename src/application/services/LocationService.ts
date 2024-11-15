@@ -17,7 +17,7 @@ export class LocationService {
       params.radius
     );
 
-    console.log("Found locations:", locations);
+    console.log("Found initial locations:", locations);
 
     if (params.weatherCondition) {
       console.log("Filtering by weather condition:", params.weatherCondition);
@@ -33,6 +33,7 @@ export class LocationService {
               location.latitude,
               location.longitude
             );
+            console.log(`Weather for ${location.city}:`, weather);
             return {
               ...location,
               weather,
@@ -47,23 +48,40 @@ export class LocationService {
         })
       );
 
+      console.log("All weather results:", locationsWithWeather);
+
       const filteredLocations = locationsWithWeather
         .filter(
-          (
-            result
-          ): result is PromiseFulfilledResult<LocationWithWeather | null> =>
+          (result): result is PromiseFulfilledResult<LocationWithWeather | null> =>
             result.status === "fulfilled"
         )
         .map((result) => result.value)
-        .filter(
-          (location): location is LocationWithWeather =>
-            location !== null &&
-            location.weather.condition.toLowerCase() ===
-              params.weatherCondition?.toLowerCase()
-        );
+        .filter((location): location is LocationWithWeather => {
+          if (!location || !location.weather) return false;
+          
+          const requestedCondition = params.weatherCondition
+            ?.replace(/"/g, '')
+            .toLowerCase()
+            .trim();
+          const actualCondition = location.weather.condition.toLowerCase().trim();
+          
+          console.log(`Comparing weather for ${location.city}:`, {
+            requested: requestedCondition,
+            actual: actualCondition,
+            matches: actualCondition === requestedCondition
+          });
+
+          return actualCondition === requestedCondition;
+        });
 
       console.log("Filtered locations by weather:", filteredLocations);
-      return filteredLocations;
+      return filteredLocations.map(location => ({
+        ...location,
+        weather: {
+          temperature: location.weather.temperature,
+          condition: location.weather.condition
+        }
+      }));
     }
 
     return locations;
