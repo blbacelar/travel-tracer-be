@@ -9,6 +9,7 @@ export interface Location {
     condition: string;
   };
   distance: number;
+  straightLineDistance?: number;
 }
 
 export interface LocationSearchParams {

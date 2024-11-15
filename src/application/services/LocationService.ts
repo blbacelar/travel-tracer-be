@@ -50,6 +50,11 @@ export class LocationService {
 
       console.log("All weather results:", locationsWithWeather);
 
+      const requestedCondition = params.weatherCondition
+        .replace(/"/g, '')
+        .toLowerCase()
+        .trim();
+
       const filteredLocations = locationsWithWeather
         .filter(
           (result): result is PromiseFulfilledResult<LocationWithWeather | null> =>
@@ -59,29 +64,19 @@ export class LocationService {
         .filter((location): location is LocationWithWeather => {
           if (!location || !location.weather) return false;
           
-          const requestedCondition = params.weatherCondition
-            ?.replace(/"/g, '')
-            .toLowerCase()
-            .trim();
           const actualCondition = location.weather.condition.toLowerCase().trim();
           
           console.log(`Comparing weather for ${location.city}:`, {
             requested: requestedCondition,
             actual: actualCondition,
-            matches: actualCondition === requestedCondition
+            matches: actualCondition.includes(requestedCondition)
           });
 
-          return actualCondition === requestedCondition;
+          return actualCondition.includes(requestedCondition);
         });
 
       console.log("Filtered locations by weather:", filteredLocations);
-      return filteredLocations.map(location => ({
-        ...location,
-        weather: {
-          temperature: location.weather.temperature,
-          condition: location.weather.condition
-        }
-      }));
+      return filteredLocations;
     }
 
     return locations;

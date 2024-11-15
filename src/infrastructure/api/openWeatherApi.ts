@@ -1,52 +1,59 @@
 import axios from "axios";
 import { Location } from "@/domain/entities/Location";
 
-interface GeocodingResponse {
+interface NominatimResponse {
   name: string;
-  lat: number;
-  lon: number;
-  country: string;
-  state?: string;
+  lat: string;
+  lon: string;
+  address: {
+    city?: string;
+    town?: string;
+    village?: string;
+    state?: string;
+    country?: string;
+  };
+  type: string;
+  class: string;
+  display_name: string;
 }
 
-interface WeatherResponse {
-  main: {
-    temp: number;
+interface WeatherApiResponse {
+  current: {
+    temp_c: number;
+    condition: {
+      text: string;
+    };
   };
-  weather: Array<{
-    main: string;
-    description: string;
-  }>;
+}
+
+interface GoogleDistanceResponse {
+  rows: [
+    {
+      elements: [
+        {
+          distance: {
+            value: number; // distance in meters
+          };
+          status: string;
+        }
+      ];
+    }
+  ];
+  status: string;
 }
 
 export class OpenWeatherApi {
-  private readonly weatherUrl = "https://api.openweathermap.org/data/2.5";
-  private readonly geoUrl = "http://api.openweathermap.org/geo/1.0";
-  private readonly apiKey: string;
-  private readonly geocodingApiKey: string;
-
-  // Map of country codes to full names
-  private readonly countryNames: { [key: string]: string } = {
-    CA: "Canada",
-    US: "United States",
-    MX: "Mexico",
-    GB: "United Kingdom",
-    FR: "France",
-    DE: "Germany",
-    IT: "Italy",
-    ES: "Spain",
-    BR: "Brazil",
-    AU: "Australia",
-    JP: "Japan",
-    CN: "China",
-    IN: "India",
-  };
+  private readonly weatherApiKey: string;
+  private readonly googleMapsKey: string;
 
   constructor() {
-    this.apiKey = process.env.OPENWEATHER_API_KEY!;
-    this.geocodingApiKey = process.env.OPENWEATHER_GEOCODING_API_KEY!;
-    if (!this.apiKey || !this.geocodingApiKey) {
-      throw new Error("OpenWeather API keys are not configured");
+    this.weatherApiKey = process.env.WEATHER_API_KEY!;
+    this.googleMapsKey = process.env.GOOGLE_MAPS_API_KEY!;
+    if (!this.weatherApiKey) {
+      throw new Error("Weather API key is not configured");
+    }
+    if (!this.googleMapsKey) {
+      throw new Error("Google Maps API key is not configured");
     }
   }
 
@@ -56,63 +63,127 @@ export class OpenWeatherApi {
     radius: number = 100
   ): Promise<Location[]> {
     try {
-      const cities: Location[] = [];
-      const searchPoints = this.generateSearchPoints(lat, lon, radius);
+      const allLocations: Location[] = [];
 
-      for (const point of searchPoints) {
-        try {
-          // Get cities using reverse geocoding
-          const response = await axios.get<GeocodingResponse[]>(
-            `${this.geoUrl}/reverse`,
-            {
-              params: {
-                lat: point.lat,
-                lon: point.lon,
-                limit: 10,
-                appid: this.geocodingApiKey,
-              },
-            }
-          );
+      // Calculate bounding box for the search area
+      const bbox = this.calculateBBox(lat, lon, radius);
 
-          if (response.data && Array.isArray(response.data)) {
-            for (const location of response.data) {
-              const distance = this.calculateDistance(
-                lat,
-                lon,
-                location.lat,
-                location.lon
-              );
-              if (distance <= radius) {
-                cities.push({
-                  city: location.name,
-                  state: location.state || undefined,
-                  country:
-                    this.countryNames[location.country] || location.country,
-                  latitude: location.lat,
-                  longitude: location.lon,
-                  distance: Math.round(distance),
-                  weather: undefined,
-                });
-              }
-            }
-          }
-        } catch (error) {
-          console.error(
-            `Failed to fetch cities for point ${point.lat},${point.lon}:`,
-            error
-          );
+      // Search for cities and towns in the area
+      const response = await axios.get<NominatimResponse[]>(
+        `https://nominatim.openstreetmap.org/search`,
+        {
+          params: {
+            format: "json",
+            "accept-language": "en",
+            addressdetails: 1,
+            limit: 50,
+            q: "[place=city] OR [place=town]",
+            viewbox: bbox,
+            bounded: 1,
+          },
+          headers: {
+            "User-Agent": "TravelTracer/1.0",
+          },
         }
-      }
-
-      const uniqueCities = this.removeDuplicates(cities);
-      console.log(
-        `Found ${uniqueCities.length} unique cities within ${radius}km radius`
       );
 
-      return uniqueCities.sort((a, b) => a.distance - b.distance);
+      console.log("Raw Nominatim response:", response.data);
+
+      if (response.data && Array.isArray(response.data)) {
+        const locations = response.data
+          .filter((place) => {
+            return (
+              place.class === "place" &&
+              ["city", "town", "village"].includes(place.type)
+            );
+          })
+          .map((place) => {
+            const distance = this.calculateDistance(
+              lat,
+              lon,
+              parseFloat(place.lat),
+              parseFloat(place.lon)
+            );
+            return {
+              city: place.name,
+              state: place.address.state,
+              country: place.address.country || "",
+              latitude: parseFloat(place.lat),
+              longitude: parseFloat(place.lon),
+              distance,
+              weather: undefined,
+            };
+          })
+          .filter((location) => location.distance <= radius);
+
+        allLocations.push(...locations);
+      }
+
+      // Try a second search specifically for villages
+      const villageResponse = await axios.get<NominatimResponse[]>(
+        `https://nominatim.openstreetmap.org/search`,
+        {
+          params: {
+            format: "json",
+            "accept-language": "en",
+            addressdetails: 1,
+            limit: 50,
+            q: "[place=village]",
+            viewbox: bbox,
+            bounded: 1,
+          },
+          headers: {
+            "User-Agent": "TravelTracer/1.0",
+          },
+        }
+      );
+
+      if (villageResponse.data && Array.isArray(villageResponse.data)) {
+        const villageLocations = villageResponse.data
+          .filter(
+            (place) => place.class === "place" && place.type === "village"
+          )
+          .map((place) => {
+            const distance = this.calculateDistance(
+              lat,
+              lon,
+              parseFloat(place.lat),
+              parseFloat(place.lon)
+            );
+            return {
+              city: place.name,
+              state: place.address.state,
+              country: place.address.country || "",
+              latitude: parseFloat(place.lat),
+              longitude: parseFloat(place.lon),
+              distance,
+              weather: undefined,
+            };
+          })
+          .filter((location) => location.distance <= radius);
+
+        allLocations.push(...villageLocations);
+      }
+
+      // After getting locations, calculate driving distances
+      const locationsWithDrivingDistance = await this.addDrivingDistances(
+        lat,
+        lon,
+        allLocations
+      );
+
+      // Remove duplicates and sort by distance
+      const uniqueLocations = this.removeDuplicates(
+        locationsWithDrivingDistance
+      );
+      console.log(
+        `Found ${uniqueLocations.length} unique cities within ${radius}km radius`
+      );
+
+      return uniqueLocations.sort((a, b) => a.distance - b.distance);
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        console.error("OpenWeather API Error:", {
+        console.error("Location Search Error:", {
           status: error.response?.status,
           data: error.response?.data,
           message: error.message,
@@ -122,40 +193,67 @@ export class OpenWeatherApi {
     }
   }
 
-  private generateSearchPoints(
-    centerLat: number,
-    centerLon: number,
-    radius: number
-  ): Array<{ lat: number; lon: number }> {
-    const points: Array<{ lat: number; lon: number }> = [];
-    const gridSize = Math.ceil(radius / 25); // One point every 25km for better coverage
-    const latDelta = radius / 111.32; // Convert km to degrees latitude
-    const lonDelta = radius / (111.32 * Math.cos((centerLat * Math.PI) / 180)); // Adjust for longitude
+  private calculateBBox(lat: number, lon: number, radius: number): string {
+    // Convert radius from km to degrees (approximate)
+    const latDelta = radius / 111.32; // 1 degree of latitude is approximately 111.32 km
+    const lonDelta = radius / (111.32 * Math.cos((lat * Math.PI) / 180));
 
-    // Add center point
-    points.push({ lat: centerLat, lon: centerLon });
+    const minLon = lon - lonDelta;
+    const minLat = lat - latDelta;
+    const maxLon = lon + lonDelta;
+    const maxLat = lat + latDelta;
 
-    // Add grid points
-    for (let i = -gridSize; i <= gridSize; i++) {
-      for (let j = -gridSize; j <= gridSize; j++) {
-        if (i === 0 && j === 0) continue; // Skip center point as it's already added
-        const lat = centerLat + (i * latDelta) / gridSize;
-        const lon = centerLon + (j * lonDelta) / gridSize;
-        points.push({ lat, lon });
-      }
-    }
-
-    return points;
+    // Format: <min_lon>,<min_lat>,<max_lon>,<max_lat>
+    return `${minLon},${minLat},${maxLon},${maxLat}`;
   }
 
-  private removeDuplicates(cities: Location[]): Location[] {
-    const seen = new Set<string>();
-    return cities.filter((city) => {
-      const key = `${city.city}-${city.state || ""}-${city.country}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
+  private removeDuplicates(locations: Location[]): Location[] {
+    const seen = new Map<string, Location>();
+
+    locations.forEach((location) => {
+      const key = `${location.city.toLowerCase()}-${
+        location.state?.toLowerCase() || ""
+      }-${location.country.toLowerCase()}`;
+      const existing = seen.get(key);
+
+      if (!existing || location.distance < existing.distance) {
+        seen.set(key, location);
+      }
     });
+
+    return Array.from(seen.values());
+  }
+
+  async getWeather(lat: number, lon: number): Promise<Location["weather"]> {
+    try {
+      const response = await axios.get<WeatherApiResponse>(
+        `http://api.weatherapi.com/v1/current.json`,
+        {
+          params: {
+            key: this.weatherApiKey,
+            q: `${lat},${lon}`,
+          },
+        }
+      );
+
+      if (!response.data || !response.data.current) {
+        throw new Error("Invalid response from Weather API");
+      }
+
+      return {
+        temperature: response.data.current.temp_c,
+        condition: response.data.current.condition.text,
+      };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error("Weather API Error:", {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+        });
+      }
+      throw new Error("Failed to fetch weather data");
+    }
   }
 
   private calculateDistance(
@@ -174,44 +272,90 @@ export class OpenWeatherApi {
         Math.sin(dLon / 2) *
         Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return Math.round(R * c);
   }
 
-  async getWeather(lat: number, lon: number): Promise<Location["weather"]> {
+  private async addDrivingDistances(
+    originLat: number,
+    originLon: number,
+    locations: Location[]
+  ): Promise<Location[]> {
     try {
-      const response = await axios.get<WeatherResponse>(
-        `${this.weatherUrl}/weather`,
-        {
-          params: {
-            lat,
-            lon,
-            appid: this.apiKey,
-            units: "metric",
-          },
+      // Google Maps API has a limit of 25 destinations per request
+      const batchSize = 25;
+      const batches = [];
+
+      for (let i = 0; i < locations.length; i += batchSize) {
+        batches.push(locations.slice(i, i + batchSize));
+      }
+
+      const locationsWithDrivingDistance: Location[] = [];
+
+      for (const batch of batches) {
+        const destinations = batch
+          .map((loc) => `${loc.latitude},${loc.longitude}`)
+          .join("|");
+
+        const response = await axios.get<GoogleDistanceResponse>(
+          "https://maps.googleapis.com/maps/api/distancematrix/json",
+          {
+            params: {
+              origins: `${originLat},${originLon}`,
+              destinations: destinations,
+              mode: "driving",
+              key: this.googleMapsKey,
+            },
+          }
+        );
+
+        console.log("Google Distance Response:", response.data);
+
+        if (response.data.status === "OK") {
+          batch.forEach((location, index) => {
+            const element = response.data.rows[0].elements[index];
+            if (element.status === "OK") {
+              locationsWithDrivingDistance.push({
+                ...location,
+                distance: Math.round(element.distance.value / 1000), // Convert meters to kilometers
+                straightLineDistance: this.calculateDistance(
+                  originLat,
+                  originLon,
+                  location.latitude,
+                  location.longitude
+                ),
+              });
+            } else {
+              // Fallback to straight-line distance if driving route not found
+              locationsWithDrivingDistance.push({
+                ...location,
+                distance: this.calculateDistance(
+                  originLat,
+                  originLon,
+                  location.latitude,
+                  location.longitude
+                ),
+              });
+            }
+          });
         }
-      );
 
-      if (
-        !response.data ||
-        !response.data.weather ||
-        !response.data.weather[0]
-      ) {
-        throw new Error("Invalid response from OpenWeather API");
+        // Add delay to respect rate limits
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      return {
-        temperature: response.data.main.temp,
-        condition: response.data.weather[0].main,
-      };
+      return locationsWithDrivingDistance;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        console.error("OpenWeather API Error:", {
-          status: error.response?.status,
-          data: error.response?.data,
-          message: error.message,
-        });
-      }
-      throw new Error("Failed to fetch weather data");
+      console.error("Error calculating driving distances:", error);
+      // Fallback to straight-line distances if Google Maps API fails
+      return locations.map((location) => ({
+        ...location,
+        distance: this.calculateDistance(
+          originLat,
+          originLon,
+          location.latitude,
+          location.longitude
+        ),
+      }));
     }
   }
 }
