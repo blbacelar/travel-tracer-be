@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { LocationController } from "@/interfaces/controllers/LocationController";
-import { LocationService } from "@/application/services/LocationService";
-import { LocationRepository } from "@/infrastructure/repositories/LocationRepository";
-import { OpenWeatherApi } from "@/infrastructure/api/openWeatherApi";
+import { LocationController } from "../../interfaces/controllers/LocationController";
+import { LocationService } from "../services/LocationService";
+import { LocationRepository } from "../../infrastructure/repositories/LocationRepository";
+import { OpenWeatherApi } from "../../infrastructure/api/openWeatherApi";
 
 const router = Router();
 

@@ -1,7 +1,7 @@
-import { Location, LocationSearchParams } from "@/domain/entities/Location";
-import { ILocationRepository } from "@/domain/repositories/ILocationRepository";
-import { OpenWeatherApi } from "@/infrastructure/api/openWeatherApi";
-import { CacheService } from '@/infrastructure/services/CacheService';
+import { Location, LocationSearchParams } from "../../domain/entities/Location";
+import { ILocationRepository } from "../../domain/repositories/ILocationRepository";
+import { OpenWeatherApi } from "../../infrastructure/api/openWeatherApi";
+import { CacheService } from "../../infrastructure/services/CacheService";
 
 export class LocationService {
   private readonly cacheService: CacheService;
@@ -96,9 +96,9 @@ export class LocationService {
         });
 
       console.log("Filtered locations by weather:", filteredLocations);
-
-      // Cache the final results
-      this.cacheService.set(cacheKey, filteredLocations, 900); // Cache for 15 minutes
+      
+      // Cache the filtered results
+      await this.cacheService.set(cacheKey, filteredLocations, 900); // Cache for 15 minutes
       return filteredLocations;
     }
 

@@ -4,7 +4,7 @@
   "description": "Travel location finder based on weather and distance",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon -r dotenv/config -r tsconfig-paths/register src/index.ts",
+    "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsup src/index.ts --format cjs --dts --clean",
     "start": "node dist/index.js",
     "postinstall": "npm run build"
@@ -26,6 +26,7 @@
     "@types/node": "^22.9.0",
     "nodemon": "^3.1.7",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "4.2.0",
     "typescript": "^5.6.3"
   },
   "engines": {
