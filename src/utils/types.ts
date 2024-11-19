@@ -1,19 +1,20 @@
+export interface Weather {
+  temperature: number;
+  condition: string;
+  date?: string;
+}
+
 export interface Location {
   city: string;
   state?: string;
   country: string;
   latitude: number;
   longitude: number;
-  weather?: {
-    temperature: number;
-    condition: string;
-    date?: string;
-  };
   distance: number;
-  straightLineDistance?: number;
+  weather?: Weather;
 }
 
-export interface LocationSearchParams {
+export interface SearchParams {
   latitude: number;
   longitude: number;
   radius: number;

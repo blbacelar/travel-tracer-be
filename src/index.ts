@@ -1,36 +1,43 @@
-import * as dotenv from "dotenv";
-import { resolve } from "path";
-
-// Load environment variables before other imports
-dotenv.config({ path: resolve(__dirname, "../.env") });
-
+import dotenv from "dotenv";
+import path from 'path';
 import express from "express";
-import locationRoutes from "./application/routes/locationRoutes";
+import locationRoutes from "./routes/locations";
+
+// Load environment variables from .env file
+const result = dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+
+if (result.error) {
+  console.error('Error loading .env file:', result.error);
+} else {
+  console.log('Environment variables loaded successfully');
+  console.log('WEATHER_API_KEY exists:', !!process.env.WEATHER_API_KEY);
+}
+
+console.log('[App] Environment check:', {
+  hasWeatherKey: !!process.env.WEATHER_API_KEY,
+  weatherKeyLength: process.env.WEATHER_API_KEY?.length,
+  port: process.env.PORT,
+});
 
 const app = express();
 
-// Add CORS headers for Vercel
+// Middleware
+app.use(express.json());
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
 
-app.use(express.json());
+// Routes
 app.use("/api/locations", locationRoutes);
 
-// Vercel specific: Check if we're in production
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log('Environment variables loaded:', {
-      WEATHER_API_KEY: process.env.WEATHER_API_KEY ? 'Set' : 'Not set',
-      PORT: process.env.PORT
-    });
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
-// Export for Vercel
 export default app;
