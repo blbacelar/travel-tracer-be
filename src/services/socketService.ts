@@ -1,10 +1,11 @@
-import { Server as HTTPServer } from 'http';
-import { Server, Socket } from 'socket.io';
-import { db, ChatMessage, ChatRoom, createTimestamp } from './firebaseService';
-import { clerkClient } from '@clerk/express';
-import { DefaultEventsMap } from 'socket.io/dist/typed-events';
+import { Server as HTTPServer } from "http";
+import { Server, Socket } from "socket.io";
+import { db, ChatMessage, ChatRoom, createTimestamp } from "./firebaseService";
+import { clerkClient } from "@clerk/express";
+import { DefaultEventsMap } from "socket.io/dist/typed-events";
 
-interface AuthenticatedSocket extends Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap> {
+interface AuthenticatedSocket
+  extends Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap> {
   userId: string;
   activeRooms: Set<string>;
 }
@@ -21,10 +22,10 @@ export class ChatService {
   constructor(server: HTTPServer) {
     this.io = new Server(server, {
       cors: {
-        origin: process.env.FRONTEND_URL || '*',
-        methods: ['GET', 'POST'],
-        credentials: true
-      }
+        origin: process.env.FRONTEND_URL || "*",
+        methods: ["GET", "POST"],
+        credentials: true,
+      },
     });
 
     this.setupSocketHandlers();
@@ -37,46 +38,66 @@ export class ChatService {
     try {
       const token = socket.handshake.auth.token;
       if (!token) {
-        throw new Error('Authentication token required');
+        throw new Error("Authentication token required");
+      }
+
+      const actualToken = token.replace('Bearer ', '');
+
+      if (process.env.NODE_ENV === "development") {
+        const authenticatedSocket = socket as AuthenticatedSocket;
+        authenticatedSocket.userId = socket.handshake.query.userId as string;
+        authenticatedSocket.activeRooms = new Set();
+        this.userSockets.set(authenticatedSocket.userId, authenticatedSocket);
+        return next();
       }
 
       const authenticatedSocket = socket as AuthenticatedSocket;
-      authenticatedSocket.userId = token;
+      authenticatedSocket.userId = actualToken;
       authenticatedSocket.activeRooms = new Set();
       
-      this.userSockets.set(token, authenticatedSocket);
+      this.userSockets.set(actualToken, authenticatedSocket);
       next();
     } catch (error) {
-      console.error('[Socket] Authentication error:', error);
-      next(new Error('Authentication failed'));
+      console.error("[Socket] Authentication error:", error);
+      next(new Error("Authentication failed"));
     }
   }
 
   private setupSocketHandlers() {
     this.io.use((socket, next) => this.authenticateConnection(socket, next));
 
-    this.io.on('connection', (socket: Socket) => {
+    this.io.on("connection", (socket: Socket) => {
       const authenticatedSocket = socket as AuthenticatedSocket;
       console.log(`[Socket] User connected: ${authenticatedSocket.userId}`);
 
-      socket.on('joinRoom', (roomId: string) => this.handleJoinRoom(authenticatedSocket, roomId));
-      socket.on('sendMessage', (data) => this.handleSendMessage(authenticatedSocket, data));
-      socket.on('typing', (roomId) => this.handleTyping(authenticatedSocket, roomId));
-      socket.on('stopTyping', (roomId) => this.handleStopTyping(authenticatedSocket, roomId));
-      socket.on('disconnect', () => this.handleDisconnect(authenticatedSocket));
+      socket.on("joinRoom", (roomId: string) =>
+        this.handleJoinRoom(authenticatedSocket, roomId)
+      );
+      socket.on("sendMessage", (data) =>
+        this.handleSendMessage(authenticatedSocket, data)
+      );
+      socket.on("typing", (roomId) =>
+        this.handleTyping(authenticatedSocket, roomId)
+      );
+      socket.on("stopTyping", (roomId) =>
+        this.handleStopTyping(authenticatedSocket, roomId)
+      );
+      socket.on("disconnect", () => this.handleDisconnect(authenticatedSocket));
     });
   }
 
   private async handleJoinRoom(socket: AuthenticatedSocket, roomId: string) {
     try {
-      console.log(`[Socket] Attempting to join room ${roomId} for user ${socket.userId}`);
-      
-      const roomRef = db.collection('chats').doc(roomId);
+      console.log(
+        `[Socket] Attempting to join room ${roomId} for user ${socket.userId}`
+      );
+
+      const roomRef = db.collection("chats").doc(roomId);
       const room = await roomRef.get();
 
       if (!room.exists) {
         console.log(`[Socket] Room ${roomId} not found`);
-        socket.emit('error', { message: `Chat room ${roomId} not found` });
+        socket.emit("error", { message: `Chat room ${roomId} not found` });
         return;
       }
 
@@ -84,11 +105,14 @@ export class ChatService {
       console.log(`[Socket] Room data:`, roomData);
 
       if (!roomData.participants.includes(socket.userId)) {
-        console.log(`[Socket] User ${socket.userId} not in participants list:`, roomData.participants);
-        
+        console.log(
+          `[Socket] User ${socket.userId} not in participants list:`,
+          roomData.participants
+        );
+
         // Add user to participants if they're trying to join
         await roomRef.update({
-          participants: [...roomData.participants, socket.userId]
+          participants: [...roomData.participants, socket.userId],
         });
         console.log(`[Socket] Added user ${socket.userId} to participants`);
       }
@@ -98,41 +122,53 @@ export class ChatService {
 
       // Fetch recent messages when joining
       const messagesRef = db
-        .collection('chats')
+        .collection("chats")
         .doc(roomId)
-        .collection('messages');
+        .collection("messages");
 
       // Check if messages collection exists
       const messagesSnapshot = await messagesRef
-        .orderBy('timestamp', 'desc')
+        .orderBy("timestamp", "desc")
         .limit(50)
         .get();
 
-      console.log(`[Socket] Found ${messagesSnapshot.size} messages for room ${roomId}`);
-      console.log('[Socket] Messages:', messagesSnapshot.docs.map(doc => doc.data()));
+      console.log(
+        `[Socket] Found ${messagesSnapshot.size} messages for room ${roomId}`
+      );
+      console.log(
+        "[Socket] Messages:",
+        messagesSnapshot.docs.map((doc) => doc.data())
+      );
 
-      const messageHistory = messagesSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })).reverse(); // Reverse to show oldest first
+      const messageHistory = messagesSnapshot.docs
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+        .reverse(); // Reverse to show oldest first
 
       // Send message history to the joining user
-      socket.emit('messageHistory', { 
-        roomId, 
-        messages: messageHistory 
+      socket.emit("messageHistory", {
+        roomId,
+        messages: messageHistory,
       });
-      console.log(`[Socket] Sent message history to user ${socket.userId} for room ${roomId}:`, messageHistory);
+      console.log(
+        `[Socket] Sent message history to user ${socket.userId} for room ${roomId}:`,
+        messageHistory
+      );
 
       // Set up real-time listeners for this room
       this.setupRoomListener(socket, roomId);
 
-      console.log(`[Socket] User ${socket.userId} successfully joined room ${roomId}`);
-      socket.emit('roomJoined', { roomId });
+      console.log(
+        `[Socket] User ${socket.userId} successfully joined room ${roomId}`
+      );
+      socket.emit("roomJoined", { roomId });
     } catch (error) {
-      console.error('[Socket] Join room error:', error);
-      socket.emit('error', { 
-        message: 'Failed to join room',
-        details: error instanceof Error ? error.message : 'Unknown error'
+      console.error("[Socket] Join room error:", error);
+      socket.emit("error", {
+        message: "Failed to join room",
+        details: error instanceof Error ? error.message : "Unknown error",
       });
     }
   }
@@ -142,11 +178,15 @@ export class ChatService {
     { roomId, content }: { roomId: string; content: string }
   ) {
     try {
-      console.log(`[Socket] Sending message to room ${roomId} from user ${socket.userId}`);
-      
+      console.log(
+        `[Socket] Sending message to room ${roomId} from user ${socket.userId}`
+      );
+
       // Check if user is in room
       if (!socket.activeRooms.has(roomId)) {
-        console.log(`[Socket] User ${socket.userId} not in room ${roomId}, joining...`);
+        console.log(
+          `[Socket] User ${socket.userId} not in room ${roomId}, joining...`
+        );
         await this.handleJoinRoom(socket, roomId);
       }
 
@@ -155,85 +195,93 @@ export class ChatService {
         content,
         timestamp: createTimestamp(),
         roomId,
-        readStatus: false
+        readStatus: false,
       };
 
       const messageRef = await db
-        .collection('chats')
+        .collection("chats")
         .doc(roomId)
-        .collection('messages')
+        .collection("messages")
         .add(message);
 
       // Update last message in room
-      await db.collection('chats').doc(roomId).update({
-        lastMessage: message
+      await db.collection("chats").doc(roomId).update({
+        lastMessage: message,
       });
 
       const messageWithId = {
         id: messageRef.id,
-        ...message
+        ...message,
       };
 
-      console.log(`[Socket] Broadcasting message to room ${roomId}:`, messageWithId);
-      
+      console.log(
+        `[Socket] Broadcasting message to room ${roomId}:`,
+        messageWithId
+      );
+
       // Broadcast to all sockets in the room
-      this.io.to(roomId).emit('newMessage', messageWithId);
+      this.io.to(roomId).emit("newMessage", messageWithId);
 
       // Log connected sockets in room
       const room = this.io.sockets.adapter.rooms.get(roomId);
-      console.log(`[Socket] Sockets in room ${roomId}:`, Array.from(room || []));
-
+      console.log(
+        `[Socket] Sockets in room ${roomId}:`,
+        Array.from(room || [])
+      );
     } catch (error) {
-      console.error('[Socket] Send message error:', error);
-      socket.emit('error', { message: 'Failed to send message' });
+      console.error("[Socket] Send message error:", error);
+      socket.emit("error", { message: "Failed to send message" });
     }
   }
 
   private setupRoomListener(socket: AuthenticatedSocket, roomId: string) {
     console.log(`[Socket] Setting up room listener for ${roomId}`);
-    
+
     const messagesRef = db
-      .collection('chats')
+      .collection("chats")
       .doc(roomId)
-      .collection('messages')
-      .orderBy('timestamp', 'desc')
+      .collection("messages")
+      .orderBy("timestamp", "desc")
       .limit(50);
 
     messagesRef.onSnapshot(
       (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
+          if (change.type === "added") {
             const message = change.doc.data() as ChatMessage;
             const messageWithId = {
               id: change.doc.id,
-              ...message
+              ...message,
             };
-            console.log(`[Socket] New message in room ${roomId}:`, messageWithId);
-            this.io.to(roomId).emit('newMessage', messageWithId);
+            console.log(
+              `[Socket] New message in room ${roomId}:`,
+              messageWithId
+            );
+            this.io.to(roomId).emit("newMessage", messageWithId);
           }
         });
       },
       (error) => {
-        console.error('[Socket] Room listener error:', error);
+        console.error("[Socket] Room listener error:", error);
       }
     );
   }
 
   private handleTyping(socket: AuthenticatedSocket, roomId: string) {
-    socket.to(roomId).emit('userTyping', { userId: socket.userId });
+    socket.to(roomId).emit("userTyping", { userId: socket.userId });
   }
 
   private handleStopTyping(socket: AuthenticatedSocket, roomId: string) {
-    socket.to(roomId).emit('userStoppedTyping', { userId: socket.userId });
+    socket.to(roomId).emit("userStoppedTyping", { userId: socket.userId });
   }
 
   private handleDisconnect(socket: AuthenticatedSocket) {
     console.log(`[Socket] User disconnected: ${socket.userId}`);
     this.userSockets.delete(socket.userId);
-    
+
     // Leave all active rooms
     socket.activeRooms.forEach((roomId) => {
       socket.leave(roomId);
     });
   }
-} 
+}
