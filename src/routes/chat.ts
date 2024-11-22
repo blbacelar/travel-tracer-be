@@ -27,18 +27,22 @@ interface RequestWithAuth extends Request {
 const router = Router();
 
 // Middleware to handle test mode authentication
-const testAuthMiddleware = (req: Request, res: Response, next: NextFunction) => {
-  if (process.env.NODE_ENV === 'test') {
-    const userId = req.headers.authorization?.replace('Bearer ', '');
+const testAuthMiddleware = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  if (process.env.NODE_ENV === "development") {
+    const userId = req.headers.authorization?.replace("Bearer ", "");
     (req as RequestWithAuth).auth = {
-      userId: userId || '',
-      sessionId: 'test-session',
+      userId: userId || "",
+      sessionId: "test-session",
       session: {
-        id: 'test-session',
-        userId: userId || ''
+        id: "test-session",
+        userId: userId || "",
       },
       claims: {},
-      getToken: async () => 'test-token'
+      getToken: async () => "test-token",
     };
     next();
   } else {
@@ -52,18 +56,19 @@ async function ensureCollection(collectionName: string) {
     // Try to access the collection
     const collection = db.collection(collectionName);
     const docs = await collection.limit(1).get();
-    
+
     // If we get here, collection exists
     return true;
   } catch (error) {
-    if ((error as any).code === 5) { // NOT_FOUND error
+    if ((error as any).code === 5) {
+      // NOT_FOUND error
       // Create a dummy document to initialize the collection
-      await db.collection(collectionName).doc('_init').set({
+      await db.collection(collectionName).doc("_init").set({
         _created: createTimestamp(),
-        _type: 'system'
+        _type: "system",
       });
       // Delete the dummy document
-      await db.collection(collectionName).doc('_init').delete();
+      await db.collection(collectionName).doc("_init").delete();
       return true;
     }
     throw error;
@@ -85,40 +90,40 @@ router.post(
       }
 
       // Ensure the chats collection exists
-      await ensureCollection('chats');
+      await ensureCollection("chats");
 
       const participantsList = [...participants];
       if (!participantsList.includes(userId)) {
         participantsList.push(userId);
       }
 
-      const room: Omit<ChatRoom, 'id'> = {
+      const room: Omit<ChatRoom, "id"> = {
         type,
         participants: participantsList,
         createdAt: createTimestamp(),
       };
 
-      console.log('Creating room with data:', room);
+      console.log("Creating room with data:", room);
 
       const roomRef = await db.collection("chats").add(room);
       const roomDoc = await roomRef.get();
-      
+
       if (!roomDoc.exists) {
-        throw new Error('Failed to create room');
+        throw new Error("Failed to create room");
       }
 
       const createdRoom = {
         id: roomRef.id,
-        ...roomDoc.data()
+        ...roomDoc.data(),
       };
 
-      console.log('Room created successfully:', createdRoom);
+      console.log("Room created successfully:", createdRoom);
       res.json(createdRoom);
     } catch (error) {
       console.error("[Chat] Create room error:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to create chat room",
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : "Unknown error",
       });
     }
   }
@@ -137,10 +142,10 @@ router.get(
         throw new Error("User not authenticated");
       }
 
-      console.log('Fetching rooms for user:', userId);
+      console.log("Fetching rooms for user:", userId);
 
       // Ensure the chats collection exists
-      await ensureCollection('chats');
+      await ensureCollection("chats");
 
       const roomsSnapshot = await db
         .collection("chats")
@@ -148,22 +153,22 @@ router.get(
         .get();
 
       if (roomsSnapshot.empty) {
-        console.log('No rooms found for user:', userId);
+        console.log("No rooms found for user:", userId);
         return res.json([]);
       }
 
       const rooms = roomsSnapshot.docs.map((doc) => ({
         id: doc.id,
-        ...doc.data()
+        ...doc.data(),
       }));
 
-      console.log('Found rooms:', rooms);
+      console.log("Found rooms:", rooms);
       res.json(rooms);
     } catch (error) {
       console.error("[Chat] Get rooms error:", error);
-      res.status(500).json({ 
+      res.status(500).json({
         error: "Failed to fetch chat rooms",
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : "Unknown error",
       });
     }
   }
